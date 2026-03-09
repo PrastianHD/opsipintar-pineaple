@@ -1,226 +1,189 @@
-// lib/prompts.ts
+// lib/prompts.ts — Pipeline 8 Step UGC (Optimized for Nano Banana & Veo3/I2V)
+// S1 getProductAnalysisPrompt  → /api/analyze
+// S2 getCreativeDirectorPrompt → /api/creative
+// S3 getHookGeneratorPrompt    → /api/hooks
+// S4 getImagePromptWithModel   → /api/generate-image (ada model)
+// S5 getImagePromptProductOnly → /api/generate-image (produk only)
+// S6 getSceneAnalyzerPrompt    → /api/scene-analyze
+// S7 getVideoSceneBuilderPrompt→ /api/video-scene
+// S8 getUGCScriptSystemPrompt  → /api/video-prompt (system)
+//    getUGCScriptUserPrompt    → /api/video-prompt (user)
 
-// ─── 1. PROMPT UNTUK ANALISIS PRODUK (GPT-4o Vision) ────────────────────────
-export function getAnalyzePrompt(
+import type { ProductAnalysis, CreativeConcept, SceneAnalysis, VideoScenePlan } from '@/lib/types'
+
+// ─── S1 PRODUCT ANALYSIS ─────────────────────────────────────────────────────
+export function getProductAnalysisPrompt(
   productName: string,
-  productCategory: string,
-  productDescription: string,
-  targetMarketInput: string,
-  userNeedCharacter: boolean | null,
-  hasReferenceVideo: boolean = false
+  category: string,
+  description: string,
+  targetMarket: string,
+  hasReferenceVideo = false
 ): string {
-  let characterInstruction = "Untuk 'needCharacter': set true jika produk lebih menarik didemonstrasikan orang, set false jika visual produk saja sudah cukup. Sesuaikan 'videoScene' dengan pilihanmu."
-  let userPref = "Bebas pilih yang terbaik (AI Auto)"
+  const ref = hasReferenceVideo
+    ? ' REF_VIDEO=true: mirror hook style & pacing from reference frames in ugc_angles.'
+    : ''
+  const desc = (description || 'none').slice(0, 180)
+  return `Product: ${productName} | Cat: ${category} | Market: ${targetMarket || 'auto'} | Desc: ${desc}${ref}
+Analyze image+info for viral UGC potential. JSON only:
+{"product":"${productName}","category":"","visual_elements":["","",""],"target_market":"","strengths":["","",""],"weaknesses":[""],"ugc_angles":["","",""],"confidence":"high"}`
+}
 
-  if (userNeedCharacter === true) {
-    userPref = "Wajib ada orang/model"
-    characterInstruction = "USER MEMINTA: WAJIB MENGGUNAKAN MODEL/ORANG. Atur 'needCharacter' menjadi true, dan pastikan 'videoScene' melibatkan manusia/orang."
-  } else if (userNeedCharacter === false) {
-    userPref = "Tanpa orang (Fokus Produk Only)"
-    characterInstruction = "USER MEMINTA: FOKUS PRODUK SAJA. Atur 'needCharacter' menjadi false, dan 'videoScene' HANYA fokus menyorot fisik produk. DILARANG KERAS melibatkan manusia."
-  }
+// ─── S2 CREATIVE DIRECTOR ────────────────────────────────────────────────────
+export function getCreativeDirectorPrompt(a: ProductAnalysis): string {
+  return `Product: ${a.product} | Cat: ${a.category} | Market: ${a.target_market}
+Strengths: ${a.strengths.slice(0, 3).join('; ')} | Angles: ${a.ugc_angles.slice(0, 3).join('; ')}
+Create a highly engaging, viral UGC ad concept for TikTok/Reels. JSON only:
+{"creative_concept":"","audience_persona":"","content_style":"","emotion_trigger":"","platform":"TikTok/Reels","content_goal":""}`
+}
 
-  let referenceInstruction = ""
-  if (hasReferenceVideo) {
-    referenceInstruction = `PENTING - REFERENSI VIDEO: User telah melampirkan beberapa urutan gambar (frame) dari sebuah video referensi UGC. TUGASMU: Analisis pola video tersebut. WAJIB: Tiru persis gaya, mood, dan struktur copywriting dari video referensi tersebut!`
-  }
+// ─── S3 HOOK GENERATOR ───────────────────────────────────────────────────────
+export function getHookGeneratorPrompt(a: ProductAnalysis, c: CreativeConcept): string {
+  return `${a.product} | ${c.emotion_trigger} | ${a.ugc_angles.slice(0, 2).join(', ')}
+Generate 5 viral hooks (≤10 words each) using highly engaging, trending internet slang (bahasa Indonesia gaul). Make it punchy, curiosity-inducing, and stop the scroll. No boring claims.
+{"hooks":["","","","",""]}`
+}
 
-  return `Analisis produk ini dan buat konsep video UGC:
-PRODUK:
-- Nama: ${productName}
-- Kategori: ${productCategory}
-- Deskripsi: ${productDescription || 'Tidak tersedia'}
+// ─── NEGATIVE SHARED (Optimized for Nano Banana) ─────────────────────────────
+// Dipangkas drastis agar token tidak terbuang sia-sia dan fokus pada error utama
+const NEG = 'deformed, blurry, watermark, text'
 
-USER INPUT:
-- Target Pasar: ${targetMarketInput || 'auto-detect'}
-- Preferensi Visual: ${userPref}
+// ─── S4 IMAGE PROMPT: MODEL + PRODUCT ────────────────────────────────────────
+export function getImagePromptWithModel(
+  productName: string,
+  setting: string,
+  action: string,
+  hook: string,
+  gender: 'female' | 'male' = 'female',
+  hasBg = false
+): string {
+  const h    = (hook || `Try ${productName}`).slice(0, 50)
+  const p    = productName.slice(0, 70)
+  const s    = setting.slice(0, 90)
+  const subj = gender === 'male'
+    ? '1boy, young man, 24yo, handsome, natural smile, warm skin'
+    : '1girl, young woman, 22yo, beautiful, natural smile, warm skin'
+  const bgNote = hasBg
+    ? 'Background exactly matches reference image.'
+    : `Background: ${s}.`
 
-Output JSON schema (PERSIS seperti ini):
+  return `iPhone 15 selfie, UGC style, ${subj}, holding ${p}. ${bgNote} Soft natural lighting, authentic, photorealistic, depth of field. Overlay text "${h}". Negative: ${NEG}`
+}
+
+// ─── S5 IMAGE PROMPT: PRODUCT ONLY ───────────────────────────────────────────
+export function getImagePromptProductOnly(
+  productName: string,
+  setting: string,
+  _action: string,
+  hook: string,
+  hasBg = false
+): string {
+  const h = (hook || 'Top choice').slice(0, 60)
+  const p = productName.slice(0, 80)
+  const s = setting.slice(0, 100)
+  
+  const backgroundLogic = hasBg
+    ? 'Exact same background as reference.'
+    : `Setting: ${s}, cinematic bokeh.`
+
+  return `Commercial product photography, ${p} centered. ${backgroundLogic} Studio lighting, 8k resolution, photorealistic, highly detailed. Overlay text "${h}". No humans. Negative: ${NEG}`
+}
+
+// ─── S6 SCENE ANALYZER ───────────────────────────────────────────────────────
+export function getSceneAnalyzerPrompt(productName: string, hasCharacter: boolean): string {
+  const motion = hasCharacter
+    ? 'creator moves: e.g. subtle head nod, pointing at product, dynamic expression'
+    : 'camera moves: e.g. cinematic pan, slow zoom, macro tracking — NO person'
+  const charVal = hasCharacter ? 'describe creator accurately' : 'no characters — product only'
+
+  return `Analyze image for Video-to-Video/Image-to-Video generation. Mode: ${hasCharacter ? 'creator+product' : 'product-only'}. Product: ${productName}.
+JSON only:
+{"scene_description":"","characters":"${charVal}","product_action":"","environment":"","lighting":"","camera":"","motion_ideas":["${motion}","",""]}`
+}
+
+// ─── S7 VIDEO SCENE BUILDER ───────────────────────────────────────────────────
+export function getVideoSceneBuilderPrompt(
+  productName: string,
+  scene: SceneAnalysis,
+  creative: CreativeConcept,
+  hook: string,
+  hasCharacter: boolean
+): string {
+  const type   = hasCharacter ? 'creator UGC' : 'product b-roll'
+  const c1     = hasCharacter ? 'hook delivery + product intro' : 'cinematic product reveal'
+  const c2     = hasCharacter ? 'product usage + CTA' : 'macro detail shot + dynamic light'
+  const audio  = hasCharacter ? 'voiceover + trending audio' : 'lo-fi aesthetic beat'
+
+  return `${productName} | ${type} | Hook: "${hook}" | Style: ${creative.content_style}
+Scene: ${scene.scene_description.slice(0, 80)} | Motion: ${scene.motion_ideas.join(' / ')}
+Clip1: ${c1}. Clip2: ${c2}. Audio: ${audio}.${hasCharacter ? '' : ' NO humans.'}
+Plan the video for an AI video generator (like Veo3). Ensure spatial consistency. JSON only:
+{"scene":"","actions":["",""],"camera":"","lighting":"","audio":"","final_shot":""}`
+}
+
+// ─── S8 UGC SCRIPT — SYSTEM PROMPT ───────────────────────────────────────────
+export function getUGCScriptSystemPrompt(hasCharacter: boolean): string {
+  const modeSpecific = hasCharacter 
+    ? 'You are writing for a human creator UGC video. Maintain consistent facial features, clothing, and background across clips.'
+    : 'You are writing for a product-only cinematic video. No humans allowed. Focus on camera motion, lighting shifts, and product textures.'
+
+  return `You are an expert AI Video Prompt Engineer for Veo 3 / Universal Image-to-Video models.
+Your task is to generate a complete JSON response for a 2-clip video sequence. ${modeSpecific}
+
+CRITICAL: You MUST output a JSON object with this exact structure, matching the API expectations:
 {
-  "category": "string (kategori spesifik)",
-  "keySellingPoints": ["string", "string", "string"],
-  "targetMarket": "string",
-  "recommendedTone": "string",
-  "needCharacter": boolean,
-  "videoScene": {
-    "title": "string",
-    "setting": "string",
-    "action": "string",
-    "hook": "string",
-    "duration": "20 detik" 
-  }
-}
-${characterInstruction}
-${referenceInstruction}`
-}
-
-// ─── 2A. JALUR: PRODUK + MODEL + BACKGROUND ──────────────────────────────────
-export function getPromptWithModel(
-  productName: string,
-  sceneSetting: string,
-  sceneAction: string,
-  sceneHook: string
-): string {
-  const hook = (sceneHook || `Solusi ampuh ${productName}`).slice(0, 45)
-  const safeSetting = sceneSetting.slice(0, 150)
-  const safeProduct = productName.slice(0, 80)
-  const exactProductInstruction = "CRITICAL: The product MUST look EXACTLY 100% identical to the reference image. Preserve exact packaging and label text."
-
-  const basePrompt = [
-    'Selfie-style photo of naturally beautiful young Indonesian woman.',
-    `Holding ${safeProduct} in one hand naturally.`,
-    `In ${safeSetting}.`,
-    'Natural smile, eye contact with camera.',
-    'Soft natural lighting, shallow depth of field.',
-    'Authentic UGC feel, not studio photo.',
-    exactProductInstruction
-  ].join(' ')
-
-  const overlay = [
-    'TikTok text overlay style:',
-    `Top question text: "${hook}" in white sans-serif, soft shadow.`,
-    'Position upper-left. Zero text bottom 30%.'
-  ].join(' ')
-
-  const negativeRestraints = [
-    'NO distorted hands, NO extra fingers, NO multiple limbs, NO complex hand gestures,',
-    'NO Shopee banners, NO Shopee/Tokopedia logos, NO e-commerce UI, NO discount text,',
-    'NO horizontal banners bottom, NO star ratings, NO price tags, NO app icons, NO watermarks.',
-    'NO altered product labels, NO fake text on product design, NO distorted packaging.',
-    'Bottom 30% MUST be 100% clean.'
-  ].join(' ')
-
-  const finalPrompt = `${basePrompt} ${overlay} ${negativeRestraints}`
-  return finalPrompt.length > 1450 ? finalPrompt.slice(0, 1450) : finalPrompt
-}
-
-// ─── 2B. JALUR: PRODUK ONLY + BACKGROUND ──────────────────────────────────────
-export function getPromptProductOnly(
-  productName: string,
-  sceneSetting: string,
-  sceneAction: string,
-  sceneHook: string
-): string {
-  const hook = (sceneHook || `Solusi ampuh ${productName}`).slice(0, 45)
-  const safeSetting = sceneSetting.slice(0, 150)
-  const safeAction = sceneAction.slice(0, 150)
-  const safeProduct = productName.slice(0, 80)
-  const exactProductInstruction = "CRITICAL: The product MUST look EXACTLY 100% identical to the reference image. Preserve exact packaging and label text."
-
-  const basePrompt = [
-    'UGC-style commercial hero shot, ultra-sharp detail.',
-    `${safeProduct} focal point arranged elegantly on surface.`,
-    safeSetting + '.',
-    exactProductInstruction,
-    safeAction + '.',
-    'Soft natural lighting from upper-left, gentle shadows. Clean background.',
-    'Premium approached, sharp details. Whole scene uncluttered.'
-  ].join(' ')
-
-  const overlay = [
-    'TikTok text overlay style:',
-    `Top question text: "${hook}" in white sans-serif, soft shadow.`,
-    'Position upper-left. Zero text bottom 30%.'
-  ].join(' ')
-
-  // 🔴 PENTING: Dilarang keras ada manusia atau tangan di sini
-  const negativeRestraints = [
-    'NO humans, NO people, NO faces, NO hands, NO body parts,',
-    'NO Shopee banners, NO Shopee/Tokopedia logos, NO e-commerce UI, NO discount text,',
-    'NO horizontal banners bottom, NO star ratings, NO price tags, NO app icons, NO watermarks.',
-    'NO altered product labels, NO fake text on product design, NO distorted packaging.',
-    'Bottom 30% MUST be 100% clean.'
-  ].join(' ')
-
-  const finalPrompt = `${basePrompt} ${overlay} ${negativeRestraints}`
-  return finalPrompt.length > 1450 ? finalPrompt.slice(0, 1450) : finalPrompt
-}
-
-// ─── 3. PROMPT UNTUK IMAGE-TO-VIDEO (Sesuai SOP Grok/Veo User) ────────────────
-export function getVideoSystemPrompt(hasCharacter: boolean): string {
-  const characterRules = hasCharacter ? `
-### Subject & Framing
-- Subject is an adult creator aligned with the Target Market (20+ years old)
-- Video is recorded selfie-style at arm's length
-- Subject looks directly into the lens while speaking
-- Vertical 9:16 format (TikTok / Instagram Reels style)
-- One hand interacts with the product; the recording device is never visible
-
-### Google AI Safety & Compliance
-- Use neutral descriptors such as "adult creator" or "everyday content creator"
-- Avoid age ranges that include minors
-- Avoid unnecessary physical or personal detail` 
-  : `
-### Subject & Framing
-- Product-only showcase. NO humans, NO hands, NO subjects.
-- Vertical 9:16 format (TikTok / Instagram Reels style)
-- Dynamic camera movement (pan, tilt, or zoom) focusing on product details.`;
-
-  const dialogueRules = hasCharacter ? `
-## Dialog Language Rule
-- Default: Spoken dialogue must be in Indonesian (Bahasa Indonesia)
-- Always write the exact spoken dialogue in quotation marks inside the English prompt to force lip movement!
-- 1-2 short, casual spoken sentences per clip.
-- Conversational, personal, and experience-based.` 
-  : `
-### Tone & Vibe
-- Fast-paced, commercial yet aesthetic UGC product b-roll vibe. Focus on texture, lighting, and premium feel.`;
-
-  return `You are an expert UGC (User-Generated Content) video prompt creator for Grok AI Video.
-
-## TECHNICAL CONSTRAINTS (CRITICAL)
-- Grok image-to-video generates MAXIMUM 10 seconds per run.
-- You must generate TWO consecutive prompts to create a 20-second video.
-- Clip 1: Seconds 0-10, starting from the provided start frame.
-- Clip 2: Seconds 10-20, continuing seamlessly from the exact end position of Clip 1.
-
-## CRITICAL RULES
-- Output must be in ENGLISH ONLY (except the spoken dialog in quotes).
-- Keep descriptions professional, neutral, and product-focused.
-
-${dialogueRules}
-
-## Core Video Requirements
-${characterRules}
-
-### Visual Style
-- Natural lighting and a realistic everyday setting
-- Slight camera shake, subtle grain, and minor imperfections for authenticity
-- Product must be clearly visible and used naturally
-- Do NOT show the phone, camera, reflections, mirrors, or filming equipment
-- No on-screen text, subtitles, watermarks, logos, or graphic overlays
-
-## Output Format
-Output MUST be valid JSON exact schema:
-{
+  "hook": "Spoken hook or text overlay",
+  "problem": "Problem being addressed",
+  "solution": "How the product solves it",
+  "product_demo": "Brief description of the demo",
+  "cta": "Call to action",
   "clip1": {
-    "prompt": "string — full prompt for Clip 1 (0-10s)",
-    "endFrame": "string — brief description of visual state at the end of Clip 1 for continuity",
-    "notes": "string — optional technical notes"
+    "prompt": "Highly detailed visual prompt for Video AI (e.g. 'Cinematic tracking shot, young woman smiling...'). Include Veo3 parameters seamlessly if needed.",
+    "endFrame": "Describe the exact visual state at the end of Clip 1 to ensure seamless transition.",
+    "notes": "Director/motion notes for Clip 1"
   },
   "clip2": {
-    "prompt": "string — full prompt for Clip 2 (10-20s), seamlessly continuing from clip1 endFrame",
-    "notes": "string — optional technical notes"
+    "prompt": "Highly detailed visual prompt for Video AI continuing perfectly from Clip 1's endFrame.",
+    "notes": "Director/motion notes for Clip 2"
   },
-  "fullScene": "string — one sentence summary of the entire 20s flow"
-}`;
+  "fullScene": "Overall visual and aesthetic description of the video"
 }
 
-export function getVideoUserPrompt(
-  productName: string,
-  sceneTitle: string,
-  sceneSetting: string,
-  sceneAction: string,
-  sceneHook: string,
-  recommendedTone: string
-): string {
-  return `PRODUCT INFO:
-- Name: ${productName}
-- Scene Title: ${sceneTitle}
-- Setting: ${sceneSetting}
-- Action: ${sceneAction}
-- Target Hook: "${sceneHook}"
-- Tone: ${recommendedTone}
+Rules:
+- Language: Video Prompts (clip1.prompt, clip2.prompt, endFrame) MUST be in English for the AI model.
+- Script/Dialogue (hook, problem, solution, cta): Use Indonesian (bahasa gaul / casual).
+- Camera/Motion: Specify exact camera movements (e.g., pan right, slow zoom, macro shot).
+- Consistency: Ensure clip 2 logically and visually follows clip 1.
+- No markdown outside of the JSON block.`
+}
 
-Generate the JSON output fulfilling Clip 1 (0-10s) and Clip 2 (10-20s) based on the image provided and technical rules.`;
+// ─── S8 UGC SCRIPT — USER PROMPT ─────────────────────────────────────────────
+function s(v: string | undefined | null, len: number, fallback = ''): string {
+  return (v ?? fallback).slice(0, len)
+}
+
+export function getUGCScriptUserPrompt(
+  productName: string,
+  scene: SceneAnalysis,
+  videoScene: VideoScenePlan,
+  creative: CreativeConcept,
+  analysis: ProductAnalysis,
+  hook: string
+): string {
+  const pts     = (analysis.strengths ?? []).slice(0, 3).join(', ')
+  const creator = scene.characters !== 'no characters — product only'
+    ? s(scene.characters, 80)
+    : 'none'
+
+  return `Product: ${productName}
+Hook: "${hook}"
+Creator: ${creator}
+Scene: ${s(scene.scene_description, 100)}
+Environment: ${s(scene.environment, 80)}
+C1 action: ${(videoScene.actions ?? [])[0] || ''}
+C2 action: ${(videoScene.actions ?? [])[1] || ''}
+Camera: ${s(videoScene.camera, 60)}
+Selling points: ${pts}
+Goal: ${creative.content_goal ?? ''}
+
+Generate the JSON following the exact schema provided in the system prompt. Optimize clip prompts for Veo3/Image-to-Video.`
 }

@@ -1,14 +1,17 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getAnalyzePrompt } from '@/lib/prompts'
+// app/api/analyze/route.ts
+// Step 1 — Product Analysis (Pineapple Product Analyst)
+// Input : ScrapedProduct + foto produk + (opsional) reference video frames
+// Output: ProductAnalysis JSON
 
-export const maxDuration = 60; 
-export const dynamic = 'force-dynamic';
+import { NextRequest, NextResponse } from 'next/server'
+import { getProductAnalysisPrompt } from '@/lib/prompts'
+
+export const maxDuration = 60
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    // 🔴 Terima array 'referenceFrames' (kumpulan base64 gambar dari video)
-    const { product, userInput, referenceFrames, openaiApiKey } = body
+    const { product, targetMarket, referenceFrames, openaiApiKey } = await req.json()
 
     if (!product || !openaiApiKey) {
       return NextResponse.json({ success: false, error: 'Data tidak lengkap' }, { status: 400 })
@@ -16,66 +19,75 @@ export async function POST(req: NextRequest) {
 
     const hasRefVideo = Array.isArray(referenceFrames) && referenceFrames.length > 0
 
-    const userPrompt = getAnalyzePrompt(
+    const prompt = getProductAnalysisPrompt(
       product.name,
       product.category,
       product.description,
-      userInput?.targetMarket || '',
-      userInput?.needCharacter !== undefined ? userInput.needCharacter : null,
+      targetMarket || '',
       hasRefVideo
     )
 
-    const userContent: any[] = [{ type: 'text', text: userPrompt }]
+    // Build user content: teks + foto produk + (opsional) frame video
+    const userContent: any[] = [{ type: 'text', text: prompt }]
 
-    // 1. Masukkan foto produk Shopee
-    if (product.imageUrls && product.imageUrls.length > 0) {
-      const maxImages = Math.min(product.imageUrls.length, 3)
-      for (let i = 0; i < maxImages; i++) {
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: product.imageUrls[i], detail: 'low' },
-        })
+    const productImages = (product.imageUrls || []).slice(0, 3)
+    for (const url of productImages) {
+      userContent.push({ type: 'image_url', image_url: { url, detail: 'low' } })
+    }
+
+    if (hasRefVideo) {
+      userContent.push({ type: 'text', text: 'REFERENCE VIDEO FRAMES (analyze style, hook, pacing):' })
+      for (const frame of referenceFrames) {
+        userContent.push({ type: 'image_url', image_url: { url: frame, detail: 'low' } })
       }
     }
 
-    // 2. 🔴 Masukkan jepretan frame video referensi ke GPT-4o
-    if (hasRefVideo) {
-      userContent.push({ type: 'text', text: 'BERIKUT ADALAH FRAME DARI VIDEO REFERENSI (Tolong tiru gaya, hook, dan pacing-nya):' })
-      referenceFrames.forEach((frameB64: string) => {
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: frameB64, detail: 'low' },
-        })
-      })
-    }
+    // ── LOG ──────────────────────────────────────────────────────────────────
+    console.log('\n━━━ [analyze] SYSTEM PROMPT ━━━')
+    console.log('ROLE: Pineapple Product Analyst')
+    console.log('\n━━━ [analyze] USER PROMPT ━━━')
+    console.log(prompt)
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
 
-    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${openaiApiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini', // Sebaiknya pakai gpt-4o agar sangat cerdas membaca urutan gambar
-        max_tokens: 2000,
-        temperature: 0.7,
+        model: 'gpt-5-nano',
+        max_completion_tokens: 3000,
+        reasoning_effort: 'low',
         response_format: { type: 'json_object' },
         messages: [
-          {
-            role: 'system',
-            content: 'Kamu adalah creative director dan copywriter ahli untuk video UGC sosial media (TikTok, Reels, dll).',
-          },
+          { role: 'system', content: 'You are a Pineapple Product Analyst specializing in Indonesian UGC marketing.' },
           { role: 'user', content: userContent },
         ],
       }),
     })
 
-    if (!openaiRes.ok) throw new Error('Gagal menghubungi OpenAI')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `OpenAI error: ${res.status}`)
+    }
 
-    const openaiData = await openaiRes.json()
-    const resultJson = JSON.parse(openaiData.choices[0].message.content)
+    const json = await res.json()
+    const rawContent = json.choices?.[0]?.message?.content
 
-    return NextResponse.json({ success: true, data: resultJson })
+    if (!rawContent) {
+      const finish = json.choices?.[0]?.finish_reason
+      const usage = json.usage
+      throw new Error(`GPT content kosong. finish_reason: ${finish}, tokens: ${usage?.completion_tokens}/${usage?.total_tokens}`)
+    }
+
+    console.log('\n━━━ [analyze] RESULT ━━━')
+    console.log(rawContent)
+    console.log(`tokens: ${json.usage?.total_tokens} (reasoning: ${json.usage?.completion_tokens_details?.reasoning_tokens ?? '?'})`)
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━\n')
+
+    const result = JSON.parse(rawContent)
+    return NextResponse.json({ success: true, data: result })
   } catch (err: any) {
     console.error('[analyze] error:', err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

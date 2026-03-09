@@ -1,22 +1,32 @@
+// app/api/generate-image/route.ts
+// Step 4 & 5 — Image Generator (Leonardo Nano Banana)
+// Jalur 4: Model + Product + Background
+// Jalur 5: Product Only + Background (opsional)
+//
+// Model & Background diambil dari Supabase Storage (URL publik)
+// — tidak perlu upload manual dari user lagi
+
 import { NextRequest, NextResponse } from 'next/server'
+import { getImagePromptWithModel, getImagePromptProductOnly } from '@/lib/prompts'
+import { getModelById, getBackgroundById } from '@/lib/models'
 import type { ProductAnalysis, ScrapedProduct } from '@/lib/types'
-// 🔴 IMPORT DUA JALUR PROMPT BARU KITA
-import { getPromptWithModel, getPromptProductOnly } from '@/lib/prompts'
 
-export const maxDuration = 60; // Timeout maksimal Vercel
-export const dynamic = 'force-dynamic';
+export const maxDuration = 120
+export const dynamic = 'force-dynamic'
 
-const LEO_V1 = 'https://cloud.leonardo.ai/api/rest/v1' // Untuk Upload
-const LEO_V2 = 'https://cloud.leonardo.ai/api/rest/v2' // Untuk Generate
+const LEO_V1 = 'https://cloud.leonardo.ai/api/rest/v1'
+const LEO_V2 = 'https://cloud.leonardo.ai/api/rest/v2'
+const LEONARDO_MODEL = 'gemini-2.5-flash-image'
+const IMG_WIDTH = 768
+const IMG_HEIGHT = 1344
+const STYLE_ID = '111dc692-d470-4eec-b791-3475abac4c46' // Dynamic style
 
-const LEONARDO_MODEL = 'nano-banana-2' 
-const IMG_WIDTH  = 768
-const IMG_HEIGHT = 1376
+type Strength = 'HIGH' | 'MID' | 'LOW'
 
-type ImageSlot = {
-  url: string | null   
-  strength: 'HIGH' | 'MID' | 'LOW'
-  label: string        
+interface ImageSlot {
+  url: string | null
+  strength: Strength
+  label: string
 }
 
 function leoHeaders(apiKey: string) {
@@ -27,8 +37,8 @@ function leoHeaders(apiKey: string) {
   }
 }
 
-// ─── Upload Process (LEO V1) ───────────────────────────────────────────────────
-async function uploadOneImage(sourceUrl: string, apiKey: string, label: string): Promise<string | null> {
+// ─── Upload satu gambar ke Leonardo V1 ───────────────────────────────────────
+async function uploadOneImage(sourceUrl: string, apiKey: string): Promise<string | null> {
   try {
     const initRes = await fetch(`${LEO_V1}/init-image`, {
       method: 'POST',
@@ -55,50 +65,46 @@ async function uploadOneImage(sourceUrl: string, apiKey: string, label: string):
 
     const s3Res = await fetch(uploadUrl, { method: 'POST', body: formData })
     if (!s3Res.ok && s3Res.status !== 204) return null
+
     return imageId
-  } catch (e) {
+  } catch {
     return null
   }
 }
 
-async function uploadAllImages(slots: ImageSlot[], apiKey: string): Promise<(string | null)[]> {
-  const uploads = slots.map((slot) => {
-    if (!slot.url) return Promise.resolve(null)
-    return uploadOneImage(slot.url, apiKey, slot.label)
-  })
-  return Promise.all(uploads)
+// Upload semua slot paralel
+async function uploadAll(slots: ImageSlot[], apiKey: string): Promise<(string | null)[]> {
+  return Promise.all(slots.map(s => s.url ? uploadOneImage(s.url, apiKey) : Promise.resolve(null)))
 }
 
-// ─── Generate Image (LEO V2) ──────────────────────────────
-async function generateImageLeonardoV2(
+// ─── Generate image via Leonardo V2 (GraphQL over HTTP) ──────────────────────
+async function generateImage(
   prompt: string,
   apiKey: string,
-  imageIds: (string | null)[], 
-  strengths: ('HIGH' | 'MID' | 'LOW')[]
+  imageIds: (string | null)[],
+  strengths: Strength[]
 ): Promise<string> {
-
-  const validImageReferences = imageIds
-    .map((id, i) => id ? { image: { id: id, type: 'UPLOADED' }, strength: strengths[i] } : null)
+  const validRefs = imageIds
+    .map((id, i) => id ? { image: { id, type: 'UPLOADED' }, strength: strengths[i] } : null)
     .filter(Boolean)
 
   const parameters: any = {
     width: IMG_WIDTH,
     height: IMG_HEIGHT,
-    prompt: prompt,
-    quantity: 2,
-    style_ids: ["111dc692-d470-4eec-b791-3475abac4c46"],
-    prompt_enhance: "OFF"
+    prompt,
+    quantity: 1,
+    style_ids: [STYLE_ID],
+    prompt_enhance: 'OFF',
+  }
+  if (validRefs.length > 0) {
+    parameters.guidances = { image_reference: validRefs }
   }
 
-  if (validImageReferences.length > 0) {
-    parameters.guidances = { image_reference: validImageReferences }
-  }
+  const payload = { model: LEONARDO_MODEL, parameters, public: false }
 
-  const payload = {
-    model: LEONARDO_MODEL,
-    parameters: parameters,
-    public: false
-  }
+  console.log('\n━━━ [generate-image] IMAGE PROMPT ━━━')
+  console.log(prompt)
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
 
   const res = await fetch(`${LEO_V2}/generations`, {
     method: 'POST',
@@ -107,30 +113,44 @@ async function generateImageLeonardoV2(
   })
 
   const rawText = await res.text()
-  if (!res.ok) {
-    let errMsg = `Leonardo v2 error ${res.status}`
-    try { const err = JSON.parse(rawText); errMsg = err?.error || err?.message || err?.details?.message || errMsg } catch {}
-    throw new Error(errMsg)
+  const data = JSON.parse(rawText)
+
+  // Leonardo V2 returns GraphQL errors as array with HTTP 200
+  if (Array.isArray(data)) {
+    const msg = data[0]?.extensions?.details?.errors?.[0]?.message
+      || data[0]?.message
+      || 'Leonardo GraphQL error'
+    throw new Error(msg)
   }
 
-  const data = JSON.parse(rawText)
-  const generationId = data?.generate?.generationId
+  if (!res.ok) {
+    throw new Error(data?.error || data?.message || `Leonardo error ${res.status}`)
+  }
 
-  if (!generationId) throw new Error('generationId tidak ditemukan di response Leonardo v2.')
+  const generationId = data?.generate?.generationId
+  if (!generationId) throw new Error('generationId tidak ditemukan di response Leonardo')
 
   return String(generationId)
 }
 
-// ─── Polling Status (LEO V1) ───────────────────────────────────────────────────
-async function pollUntilComplete(generationId: string, apiKey: string, maxAttempts = 20, intervalMs = 4000): Promise<string> {
+// ─── Poll sampai COMPLETE ─────────────────────────────────────────────────────
+async function pollUntilComplete(
+  generationId: string,
+  apiKey: string,
+  maxAttempts = 25,
+  intervalMs = 4000
+): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((r) => setTimeout(r, intervalMs))
-    const res = await fetch(`${LEO_V1}/generations/${generationId}`, { headers: leoHeaders(apiKey) })
+    await new Promise(r => setTimeout(r, intervalMs))
+    const res = await fetch(`${LEO_V1}/generations/${generationId}`, {
+      headers: leoHeaders(apiKey),
+    })
     if (!res.ok) continue
 
     const data = await res.json()
-    const gen  = data?.generations_by_pk
+    const gen = data?.generations_by_pk
     if (!gen) continue
+
     if (gen.status === 'COMPLETE') {
       const url = gen.generated_images?.[0]?.url
       if (!url) throw new Error('Generation COMPLETE tapi URL gambar kosong')
@@ -138,79 +158,84 @@ async function pollUntilComplete(generationId: string, apiKey: string, maxAttemp
     }
     if (gen.status === 'FAILED') throw new Error('Leonardo generation FAILED')
   }
-  throw new Error('Polling timeout')
+  throw new Error('Polling timeout — coba lagi')
 }
 
-// ─── POST Handler Utama ────────────────────────────────────────────────────────
+// ─── POST Handler ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const { product, analysis, leonardoApiKey, characterUrl, backgroundUrl, customPrompt } = body
+    const {
+      product,
+      productAnalysis,
+      creative,
+      selectedHook,
+      needCharacter,
+      modelId,       // string — id dari MODEL_PRESETS
+      backgroundId,  // string | null — id dari BACKGROUND_PRESETS, opsional
+      customPrompt,
+      leonardoApiKey,
+    } = await req.json()
 
     if (!leonardoApiKey) {
       return NextResponse.json({ success: false, error: 'Leonardo API key diperlukan' }, { status: 400 })
     }
 
-    // 🔴 KITA SPLIT JALUR DI SINI (TOTAL OVERHAUL)
-    let slots: ImageSlot[] = [];
-    let prompt = customPrompt;
+    // ── Resolve URL dari preset Supabase ──────────────────────────────────────
+    const modelPreset = modelId ? getModelById(modelId) : null
+    const bgPreset = backgroundId ? getBackgroundById(backgroundId) : null
 
-    if (analysis.needCharacter) {
-      // ── JALUR 1: PRODUK + MODEL + BACKGROUND ──
+    const setting = productAnalysis?.ugc_angles?.[0] || creative?.content_style || 'everyday setting'
+    const action = creative?.creative_concept?.slice(0, 100) || 'using the product naturally'
+    const hook = selectedHook || `Coba ${product.name}`
+
+    let slots: ImageSlot[]
+    let prompt: string
+
+    if (needCharacter && modelPreset) {
+      // ── Jalur 4: Ada model ──────────────────────────────────────────────────
       slots = [
-        { url: product.imageUrls?.[0] ?? null, strength: 'HIGH', label: 'product' },
-        { url: characterUrl ?? null, strength: 'MID', label: 'character' },
-        { url: backgroundUrl ?? null, strength: 'MID', label: 'background' },
-      ];
-      
-      if (!prompt) {
-        prompt = getPromptWithModel(
-          product.name, 
-          analysis.videoScene.setting, 
-          analysis.videoScene.action, 
-          analysis.videoScene.hook
-        );
-      }
+        { url: product.imageUrls?.[0] ?? null, strength: 'HIGH', label: 'product'    },
+        { url: modelPreset.url,                strength: 'MID',  label: 'model'      },
+        // Background HIGH agar Leonardo tidak mengubahnya
+        { url: bgPreset?.url ?? null,          strength: 'HIGH', label: 'background' },
+      ]
+      prompt = customPrompt || getImagePromptWithModel(
+        product.name, setting, action, hook, modelPreset.gender,
+        !!bgPreset   // ← flag: ada bg referensi
+      )
     } else {
-      // ── JALUR 2: PRODUK ONLY + BACKGROUND ──
+      // ── Jalur 5: Produk only ────────────────────────────────────────────────
       slots = [
-        { url: product.imageUrls?.[0] ?? null, strength: 'HIGH', label: 'product' },
-        // Slot karakter dilewati (skip) sepenuhnya
-        { url: backgroundUrl ?? null, strength: 'MID', label: 'background' },
-      ];
-      
-      if (!prompt) {
-        prompt = getPromptProductOnly(
-          product.name, 
-          analysis.videoScene.setting, 
-          analysis.videoScene.action, 
-          analysis.videoScene.hook
-        );
-      }
+        { url: product.imageUrls?.[0] ?? null, strength: 'HIGH', label: 'product'    },
+        { url: bgPreset?.url ?? null,          strength: 'HIGH', label: 'background' },
+      ]
+      prompt = customPrompt || getImagePromptProductOnly(
+        product.name, setting, action, hook,
+        !!bgPreset   // ← flag: ada bg referensi
+      )
     }
 
-    const imageIds = await uploadAllImages(slots, leonardoApiKey)
+    const imageIds = await uploadAll(slots, leonardoApiKey)
     const strengths = slots.map(s => s.strength)
-    
-    const generationId = await generateImageLeonardoV2(prompt, leonardoApiKey, imageIds, strengths)
+
+    const generationId = await generateImage(prompt, leonardoApiKey, imageIds, strengths)
     const imageUrl = await pollUntilComplete(generationId, leonardoApiKey)
+
+    console.log(`[generate-image] done → ${imageUrl}`)
 
     return NextResponse.json({
       success: true,
       data: {
-        generationId,
-        imageUrl,
-        prompt,
-        // Mapping index untuk history disimpan sesuai dengan slot yang dipakai
-        uploadedIds: { 
-          product: imageIds[0], 
-          character: analysis.needCharacter ? imageIds[1] : null, 
-          background: analysis.needCharacter ? imageIds[2] : imageIds[1] 
-        },
+        id: generationId,
+        url: imageUrl,
+        prompt,       // ← dikirim ke frontend untuk ditampilkan di dashboard
+        modelId: modelPreset?.id || null,
+        backgroundId: bgPreset?.id || null,
+        createdAt: Date.now(),
       },
     })
   } catch (err: any) {
     console.error('[generate-image] error:', err)
-    return NextResponse.json({ success: false, error: err.message || 'Server error' }, { status: 500 })
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

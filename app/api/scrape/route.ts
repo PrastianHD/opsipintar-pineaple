@@ -1,9 +1,20 @@
+// app/api/scrape/route.ts
+// Shopee scraper — prioritas: Shopee API → HTML (og:square_image → og:image)
+
 import { NextRequest, NextResponse } from 'next/server'
 import type { ScrapedProduct } from '@/lib/types'
 
-// ─── Shopee Scraper ────────────────────────────────────────────────────────────
-// Mengekstrak shopid + itemid dari berbagai format URL Shopee,
-// lalu memanggil Shopee internal API untuk mendapatkan data produk.
+// Helper function to clean the product title
+function cleanProductName(rawName: string): string {
+  if (!rawName) return 'Produk Shopee'
+  
+  // 1. Split at the pipe '|' and take the first chunk
+  // 2. Remove "Jual " (case-insensitive) from the very beginning
+  // 3. Trim extra whitespace
+  const cleaned = rawName.split('|')[0].replace(/^Jual\s+/i, '').trim()
+  
+  return cleaned || 'Produk Shopee'
+}
 
 function extractShopeeIds(url: string): { shopId: string; itemId: string } | null {
   const patterns = [
@@ -20,24 +31,21 @@ function extractShopeeIds(url: string): { shopId: string; itemId: string } | nul
 
 async function scrapeViaShopeeApi(shopId: string, itemId: string): Promise<ScrapedProduct | null> {
   const apiUrl = `https://shopee.co.id/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`
-  
+
   const res = await fetch(apiUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-      'X-Forwarded-For': `66.249.66.1`,
-      'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      'X-Forwarded-For': '66.249.66.1',
+      'Accept-Language': 'id-ID,id;q=0.9',
     },
     next: { revalidate: 0 },
   })
 
   if (!res.ok) return null
-
   const json = await res.json()
   const item = json?.data
-
   if (!item) return null
 
-  // Extract image URLs - Shopee uses CDN with image hashes
   const images: string[] = []
   if (item.images?.length) {
     item.images.slice(0, 5).forEach((hash: string) => {
@@ -47,26 +55,21 @@ async function scrapeViaShopeeApi(shopId: string, itemId: string): Promise<Scrap
     images.push(`https://down-id.img.susercontent.com/file/${item.image}`)
   }
 
-  // Category parsing
   const cats: string[] = []
   if (item.categories?.length) {
     item.categories.forEach((c: any) => cats.push(c.display_name || c.name || ''))
   } else if (item.fe_categories?.length) {
     item.fe_categories.forEach((c: any) => cats.push(c.display_name || c.name || ''))
   }
-  const category = cats.filter(Boolean).join(' > ') || 'Lainnya'
 
-  // Clean description
   let description = item.description || ''
-  description = description
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[^\S\n]{2,}/g, ' ')
-    .slice(0, 800)
+  description = description.replace(/\n{3,}/g, '\n\n').replace(/[^\S\n]{2,}/g, ' ').slice(0, 800)
 
   return {
-    name: item.name || 'Produk Shopee',
+    // Applied the cleaner function right here
+    name: cleanProductName(item.name),
     description,
-    category,
+    category: cats.filter(Boolean).join(' > ') || 'Lainnya',
     imageUrls: images,
     price: item.price ? `Rp ${(item.price / 100000).toLocaleString('id-ID')}` : undefined,
     rating: item.item_rating?.rating_star?.toFixed(1),
@@ -75,67 +78,64 @@ async function scrapeViaShopeeApi(shopId: string, itemId: string): Promise<Scrap
   }
 }
 
-async function scrapeViaHtmlFallback(url: string): Promise<ScrapedProduct | null> {
-  // Fallback: fetch HTML lalu ekstrak meta OG tags
+async function scrapeViaHtml(url: string): Promise<ScrapedProduct | null> {
   const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'facebookexternalhit/1.1',
-    },
+    headers: { 'User-Agent': 'facebookexternalhit/1.1' },
     next: { revalidate: 0 },
   })
-
   if (!res.ok) return null
   const html = await res.text()
 
+  const squareImage = html.match(/<meta[^>]+property="og:square_image"[^>]+content="([^"]+)"/i)?.[1]
+    || html.match(/<meta[^>]+name="og:square_image"[^>]+content="([^"]+)"/i)?.[1]
+
+  const ogImage = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i)?.[1]
+    || html.match(/<meta[^>]+name="og:image"[^>]+content="([^"]+)"/i)?.[1]
+
+  const primaryImage = squareImage || ogImage
+
   const ogTitle = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i)?.[1] || ''
   const ogDesc = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i)?.[1] || ''
-  const ogImage = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i)?.[1] || ''
   const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || ''
 
-  const name = ogTitle || title.split('|')[0].trim() || 'Produk Shopee'
-  const description = ogDesc || ''
-  const images = ogImage ? [ogImage] : []
+  // Grab the raw title first, then run it through the cleaner
+  const rawName = ogTitle || title || ''
+  const name = cleanProductName(rawName)
+  
+  if (!name || name === 'Produk Shopee' && !rawName) return null
 
-  if (!name) return null
+  const images: string[] = []
+  if (primaryImage) images.push(primaryImage)
+  if (ogImage && ogImage !== primaryImage) images.push(ogImage)
 
   return {
     name,
-    description,
+    description: ogDesc || '',
     category: 'Lainnya',
     imageUrls: images,
     productLink: url,
   }
 }
 
-// ─── Route Handler ─────────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   try {
     const { url } = await req.json()
-
     if (!url || typeof url !== 'string') {
       return NextResponse.json({ success: false, error: 'URL tidak valid' }, { status: 400 })
     }
 
-    // Normalize URL - handle mobile/short links
     let normalizedUrl = url.trim()
     if (!normalizedUrl.startsWith('http')) normalizedUrl = 'https://' + normalizedUrl
 
-    // Extract IDs
     const ids = extractShopeeIds(normalizedUrl)
-    
     let product: ScrapedProduct | null = null
 
     if (ids) {
-      // Primary: Shopee API
       product = await scrapeViaShopeeApi(ids.shopId, ids.itemId)
     }
-
     if (!product) {
-      // Fallback: HTML scraping
-      product = await scrapeViaHtmlFallback(normalizedUrl)
+      product = await scrapeViaHtml(normalizedUrl)
     }
-
     if (!product) {
       return NextResponse.json(
         { success: false, error: 'Gagal mengambil data produk. Pastikan link Shopee valid.' },
@@ -143,12 +143,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    console.log(`[scrape] "${product.name}" — ${product.imageUrls.length} images`)
     return NextResponse.json({ success: true, data: product })
   } catch (err: any) {
     console.error('[scrape] error:', err)
-    return NextResponse.json(
-      { success: false, error: err.message || 'Server error' },
-      { status: 500 }
-    )
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }
