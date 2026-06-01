@@ -1,0 +1,295 @@
+/* app/(home)/landing.css
+ * Editorial / heritage / terminal — landing page only
+ * Scoped via `.editorial` root to avoid collateral on dashboard
+ */
+
+.editorial {
+  --ink: #0A0908;
+  --ink-soft: #1B1818;
+  --paper: #F2EFE5;
+  --paper-warm: #E8E2D0;
+  --vermilion: #C8553D;
+  --vermilion-deep: #8C2D1B;
+  --gold: #D9A441;
+  --gold-deep: #8C6E2A;
+  --rule: rgba(10, 9, 8, 0.18);
+  --rule-soft: rgba(10, 9, 8, 0.08);
+  --grain: 0.08;
+
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.editorial * {
+  border-color: var(--rule);
+}
+
+/* ── Type system ───────────────────────────────────────────────────────── */
+.editorial .display {
+  font-family: var(--font-fraunces), 'Fraunces', Georgia, serif;
+  font-feature-settings: 'ss01', 'ss02';
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  font-weight: 300;
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+}
+.editorial .display em,
+.editorial .display .it {
+  font-style: italic;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  color: var(--vermilion);
+}
+.editorial .serif {
+  font-family: var(--font-fraunces), 'Fraunces', Georgia, serif;
+  font-variation-settings: 'opsz' 14;
+}
+.editorial .mono {
+  font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-feature-settings: 'ss02', 'cv11';
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.7;
+}
+.editorial .mono-num {
+  font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Paper texture ────────────────────────────────────────────────────── */
+.editorial .grain {
+  position: relative;
+}
+.editorial .grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--grain);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='420'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/%3E%3C/filter%3E%3Crect width='420' height='420' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Decorative rules ─────────────────────────────────────────────────── */
+.editorial .rule {
+  height: 1px;
+  background: var(--rule);
+}
+.editorial .rule-thick {
+  height: 4px;
+  background: var(--ink);
+}
+.editorial .rule-double {
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  height: 5px;
+  position: relative;
+}
+.editorial .rule-double::before {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  bottom: 1.5px;
+  left: 0;
+  right: 0;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.editorial .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.95rem 1.6rem 0.85rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  text-decoration: none;
+  transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.2s;
+  position: relative;
+  cursor: pointer;
+}
+.editorial .btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 4px 4px 0 var(--vermilion);
+}
+.editorial .btn:active {
+  transform: translate(0, 0);
+  box-shadow: 0 0 0 var(--vermilion);
+}
+.editorial .btn-ghost {
+  background: transparent;
+  color: var(--ink);
+}
+.editorial .btn-ghost:hover {
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+/* ── Drop cap ─────────────────────────────────────────────────────────── */
+.editorial .dropcap::first-letter {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  font-weight: 400;
+  font-style: italic;
+  font-size: 5.2em;
+  line-height: 0.78;
+  float: left;
+  margin: 0.08em 0.12em -0.05em 0;
+  color: var(--vermilion);
+}
+
+/* ── Issue ticker ─────────────────────────────────────────────────────── */
+.editorial .ticker-track {
+  display: flex;
+  gap: 4rem;
+  white-space: nowrap;
+  animation: ticker 40s linear infinite;
+}
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* ── Mark / highlight ─────────────────────────────────────────────────── */
+.editorial .mark {
+  background: linear-gradient(180deg, transparent 60%, var(--gold) 60%);
+  padding: 0 0.1em;
+}
+
+/* ── Margin notes (footnotes) ─────────────────────────────────────────── */
+.editorial .marginnote {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--ink);
+  opacity: 0.7;
+  border-left: 2px solid var(--vermilion);
+  padding: 0.2rem 0 0.2rem 0.7rem;
+}
+
+/* ── Pull quote ───────────────────────────────────────────────────────── */
+.editorial .pullquote {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100;
+  font-weight: 300;
+  font-style: italic;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  position: relative;
+  padding: 1.4rem 0;
+}
+.editorial .pullquote::before {
+  content: '“';
+  position: absolute;
+  top: -0.3em;
+  left: -0.05em;
+  font-size: 4.5em;
+  color: var(--vermilion);
+  opacity: 0.5;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* ── Process number block ─────────────────────────────────────────────── */
+.editorial .stepnum {
+  font-family: var(--font-fraunces), serif;
+  font-variation-settings: 'opsz' 144, 'SOFT' 100, 'WONK' 1;
+  font-style: italic;
+  font-weight: 300;
+  font-size: clamp(7rem, 14vw, 13rem);
+  line-height: 0.78;
+  letter-spacing: -0.06em;
+  color: var(--vermilion);
+  display: block;
+}
+
+/* ── Tabular grid ─────────────────────────────────────────────────────── */
+.editorial .grid-rule > * + * {
+  border-left: 1px solid var(--rule);
+}
+.editorial .v-rule {
+  border-left: 1px solid var(--rule);
+}
+
+/* ── Reveal on scroll (CSS-only, IntersectionObserver via data-attr) ──── */
+.editorial [data-reveal] {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.8s cubic-bezier(0.2, 0.7, 0.2, 1),
+              transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.editorial [data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+.editorial [data-reveal-delay="1"] { transition-delay: 0.08s; }
+.editorial [data-reveal-delay="2"] { transition-delay: 0.16s; }
+.editorial [data-reveal-delay="3"] { transition-delay: 0.24s; }
+.editorial [data-reveal-delay="4"] { transition-delay: 0.32s; }
+
+/* ── Selection ────────────────────────────────────────────────────────── */
+.editorial ::selection {
+  background: var(--vermilion);
+  color: var(--paper);
+}
+
+/* ── Print-style spec sheet rows ──────────────────────────────────────── */
+.editorial .spec-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 1.5rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.editorial .spec-row:first-child {
+  border-top: 1px solid var(--ink);
+}
+
+/* ── Hover swap link ──────────────────────────────────────────────────── */
+.editorial .swap-link {
+  position: relative;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: top;
+}
+.editorial .swap-link span {
+  display: block;
+  transition: transform 0.4s cubic-bezier(0.7, 0, 0.2, 1);
+}
+.editorial .swap-link span + span {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  color: var(--vermilion);
+}
+.editorial .swap-link:hover span {
+  transform: translateY(-100%);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .editorial [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .editorial .ticker-track {
+    animation: none;
+  }
+}

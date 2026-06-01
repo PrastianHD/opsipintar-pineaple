@@ -4,19 +4,25 @@
 // 1. Scrape → 2. Product Analysis → 3. Creative Director → 4. Hook Generator
 // → 5. Generate Image → 6. Scene Analyze → 7. Video Scene → 8. Script + Clips
 
-import { useState } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAppContext } from '@/lib/context'
 import { toast } from 'sonner'
 import {
-  ArrowLeft, ArrowRight, Link2, Loader2, Sparkles, RefreshCw,
+  ArrowRight, Link2, Loader2, Sparkles, RefreshCw,
   CheckCircle2, ShoppingBag, User, ImageIcon, Video, Film,
   ChevronDown, Copy, UserCircle2, Layers, Clapperboard, Wand2,
 } from 'lucide-react'
 import { MODEL_PRESETS, BACKGROUND_PRESETS } from '@/lib/models'
+import { generateUUID } from '@/lib/utils'
+import { extractVideoFrames } from '@/lib/frame-extract'
+import { InfoCard } from '@/components/dashboard/primitives'
+import { PageShell, PageHeader } from '@/components/dashboard/page-shell'
+import { cn } from '@/lib/utils'
 import type {
   Task, ScrapedProduct, ProductAnalysis, CreativeConcept,
   HookOptions, GeneratedImage, SceneAnalysis, VideoScenePlan, UGCScript,
+  PipelineUsage, TokenUsage,
 } from '@/lib/types'
 
 // ─── Step Bar ─────────────────────────────────────────────────────────────────
@@ -30,45 +36,70 @@ const STEPS = [
 
 function StepBar({ current }: { current: number }) {
   return (
-    <div className="flex items-center gap-0 mb-10">
-      {STEPS.map((s, i) => (
-        <div key={s.n} className="flex items-center flex-1 last:flex-none">
-          <div className={`flex items-center gap-2 ${current >= s.n ? 'opacity-100' : 'opacity-35'}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all
-              ${current > s.n ? 'bg-emerald-500 text-white' : current === s.n ? 'bg-violet-600 text-white ring-4 ring-violet-500/20' : 'bg-muted border border-border text-muted-foreground'}`}>
-              {current > s.n ? <CheckCircle2 className="w-4 h-4" /> : s.n}
-            </div>
-            <span className={`text-xs font-bold hidden sm:block ${current === s.n ? 'text-foreground' : 'text-muted-foreground'}`}>{s.label}</span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <div className={`flex-1 h-px mx-2 transition-all ${current > s.n ? 'bg-emerald-500/50' : 'bg-border'}`} />
-          )}
-        </div>
-      ))}
-    </div>
+    <nav aria-label="Progress pipeline" className="mb-8">
+      <ol className="flex items-center gap-1 sm:gap-2">
+        {STEPS.map((s, i) => {
+          const done = current > s.n
+          const active = current === s.n
+          return (
+            <li key={s.n} className="flex items-center flex-1 last:flex-none">
+              <div
+                aria-current={active ? 'step' : undefined}
+                className={cn(
+                  'flex items-center gap-2 transition-opacity',
+                  done || active ? 'opacity-100' : 'opacity-40'
+                )}
+              >
+                <div className={cn(
+                  'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all shrink-0 tabular-nums',
+                  done && 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30',
+                  active && 'bg-violet-600 text-white ring-4 ring-violet-500/20 shadow-md shadow-violet-500/25',
+                  !done && !active && 'bg-card border border-border text-muted-foreground'
+                )}>
+                  {done ? <CheckCircle2 className="w-4 h-4" /> : s.n}
+                </div>
+                <span className={cn(
+                  'text-xs font-semibold hidden sm:block whitespace-nowrap',
+                  active ? 'text-foreground' : 'text-muted-foreground'
+                )}>{s.label}</span>
+              </div>
+              {i < STEPS.length - 1 && (
+                <div className={cn(
+                  'flex-1 h-0.5 mx-1.5 sm:mx-2 rounded-full transition-all',
+                  done ? 'bg-emerald-500/50' : 'bg-border'
+                )} />
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </nav>
   )
 }
 
 // ─── Helper copy ─────────────────────────────────────────────────────────────
 function useCopy() {
-  const copy = (text: string, label = 'Disalin!') => {
+  return useCallback((text: string, label = 'Disalin!') => {
+    if (!text) return
     navigator.clipboard.writeText(text)
     toast.success(label)
-  }
-  return copy
+  }, [])
 }
 
 // ─── Loading Card ─────────────────────────────────────────────────────────────
-function LoadingCard({ label }: { label: string }) {
+function LoadingCard({ label, hint }: { label: string; hint?: string }) {
   return (
-    <div className="glass-card rounded-2xl p-12 flex flex-col items-center gap-5">
-      <div className="relative w-20 h-20">
-        <div className="w-20 h-20 rounded-full bg-violet-500/10 flex items-center justify-center border border-violet-500/20">
-          <Sparkles className="w-10 h-10 text-violet-500 animate-pulse" />
+    <div className="glass-card rounded-2xl p-10 sm:p-12 flex flex-col items-center gap-5 text-center">
+      <div className="relative w-16 h-16 sm:w-20 sm:h-20">
+        <div className="absolute inset-0 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+          <Sparkles className="w-7 h-7 sm:w-9 sm:h-9 text-violet-500 animate-pulse" />
         </div>
-        <div className="absolute inset-0 rounded-full border-2 border-violet-500/30 border-t-violet-500 animate-spin" />
+        <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-violet-500 border-r-violet-500/40 animate-spin" />
       </div>
-      <p className="font-bold text-lg text-foreground">{label}</p>
+      <div>
+        <p className="font-bold text-base sm:text-lg text-foreground">{label}</p>
+        {hint && <p className="text-xs text-muted-foreground mt-1.5">{hint}</p>}
+      </div>
     </div>
   )
 }
@@ -80,7 +111,7 @@ export default function NewTaskPage() {
   const copy = useCopy()
 
   const [uiStep, setUiStep] = useState(1)
-  const [taskId] = useState(() => 'TASK-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7).toUpperCase())
+  const [taskId] = useState(() => 'TASK-' + Date.now() + '-' + generateUUID().slice(0, 8).toUpperCase())
 
   // ── Step 1 state ────────────────────────────────────────────────────────────
   const [productUrl, setProductUrl]         = useState('')
@@ -128,34 +159,13 @@ export default function NewTaskPage() {
   }
 
   const extractFrames = (file: File, numFrames = 4): Promise<string[]> => {
-    return new Promise(resolve => {
-      const video = document.createElement('video')
-      video.src = URL.createObjectURL(file)
-      video.crossOrigin = 'anonymous'
-      video.muted = true
-      video.onloadedmetadata = async () => {
-        const interval = video.duration / (numFrames + 1)
-        const frames: string[] = []
-        const canvas = document.createElement('canvas')
-        const ctx = canvas.getContext('2d')
-        for (let i = 1; i <= numFrames; i++) {
-          video.currentTime = interval * i
-          await new Promise(r => { video.onseeked = r })
-          const s = 480 / video.videoHeight
-          canvas.width = video.videoWidth * s; canvas.height = 480
-          ctx?.drawImage(video, 0, 0, canvas.width, canvas.height)
-          frames.push(canvas.toDataURL('image/jpeg', 0.6))
-        }
-        URL.revokeObjectURL(video.src)
-        resolve(frames)
-      }
-    })
+    return extractVideoFrames(file, { numFrames })
   }
 
-  // ─── Jalankan Steps 1-3 otomatis: analyze → creative → hooks ───────────────
+  // ─── Jalankan Steps 1-3 otomatis: analyze → creative+hooks (merged) ────────
   const handleGoAnalyze = async () => {
     if (!scraped) { toast.error('Scrape produk dulu'); return }
-    if (!settings.openaiApiKey) { toast.error('OpenAI API key belum diisi'); return }
+    if (!settings.openrouterApiKey) { toast.error('OpenRouter API key belum diisi'); return }
 
     let referenceFrames: string[] = []
     if (referenceVideoFile) {
@@ -168,43 +178,46 @@ export default function NewTaskPage() {
       id: taskId, status: 'analyzing', createdAt: Date.now(), updatedAt: Date.now(),
       input: { productLink: productUrl, targetMarket, needCharacter, modelId: selectedModelId, backgroundId: selectedBgId || undefined },
       scraped,
+      usage: {},
     }
     addTask(task)
     setUiStep(2)
     setAnalyzeLoading(true)
 
+    const usage: PipelineUsage = {}
+
     try {
       // ── Step 1: Product Analysis ──────────────────────────────────────────
       const r1 = await fetch('/api/analyze', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product: scraped, targetMarket, referenceFrames, openaiApiKey: settings.openaiApiKey }),
+        body: JSON.stringify({ product: scraped, targetMarket, referenceFrames, openrouterApiKey: settings.openrouterApiKey, qualityTier: settings.qualityTier }),
       })
       const d1 = await r1.json()
       if (!d1.success) throw new Error(d1.error)
       setProductAnalysis(d1.data)
-      updateTask(taskId, { status: 'creative', productAnalysis: d1.data })
+      usage.analyze = d1.usage as TokenUsage
+      updateTask(taskId, { status: 'creative', productAnalysis: d1.data, usage })
 
-      // ── Step 2: Creative Director ─────────────────────────────────────────
-      const r2 = await fetch('/api/creative', {
+      // ── Step 2+3 merged: Creative Director + Hook Ranker ──────────────────
+      const r2 = await fetch('/api/creative-hooks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productAnalysis: d1.data, openaiApiKey: settings.openaiApiKey }),
+        body: JSON.stringify({ productAnalysis: d1.data, openrouterApiKey: settings.openrouterApiKey, qualityTier: settings.qualityTier }),
       })
       const d2 = await r2.json()
       if (!d2.success) throw new Error(d2.error)
-      setCreative(d2.data)
-      updateTask(taskId, { status: 'hooks', creative: d2.data })
-
-      // ── Step 3: Hook Generator ────────────────────────────────────────────
-      const r3 = await fetch('/api/hooks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productAnalysis: d1.data, creative: d2.data, openaiApiKey: settings.openaiApiKey }),
+      setCreative(d2.data.creative)
+      setHooks(d2.data.hooks)
+      usage.creative_hooks = d2.usage as TokenUsage
+      usage.total = (usage.analyze?.total_tokens || 0) + (usage.creative_hooks?.total_tokens || 0)
+      updateTask(taskId, {
+        status: 'generating',
+        creative: d2.data.creative,
+        hooks: d2.data.hooks,
+        hooksAll: d2.data.hooks_all,
+        usage,
       })
-      const d3 = await r3.json()
-      if (!d3.success) throw new Error(d3.error)
-      setHooks(d3.data)
-      updateTask(taskId, { status: 'generating', hooks: d3.data })
 
-      toast.success('Analisis & hook selesai!')
+      toast.success(`Analisis & hook selesai (${usage.total} tokens)`)
     } catch (e: any) {
       toast.error(e.message || 'Gagal analisis')
       updateTask(taskId, { status: 'error', error: e.message })
@@ -216,7 +229,9 @@ export default function NewTaskPage() {
   // ─── Generate Image (Step 4 & 5) ────────────────────────────────────────────
   const handleGenerateImage = async () => {
     if (!scraped || !productAnalysis) { toast.error('Analisis produk dulu'); return }
-    if (!settings.leonardoApiKey) { toast.error('Leonardo API key belum diisi'); return }
+    const provider = settings.imageProvider
+    if (provider === 'leonardo' && !settings.leonardoApiKey) { toast.error('Leonardo API key belum diisi'); return }
+    if (provider === 'openrouter' && !settings.openrouterApiKey) { toast.error('OpenRouter API key belum diisi'); return }
     if (needCharacter && !selectedModelId) { toast.error('Pilih model dulu'); return }
 
     setGenLoading(true)
@@ -234,6 +249,9 @@ export default function NewTaskPage() {
           backgroundId: selectedBgId || null,
           customPrompt: customPrompt || undefined,
           leonardoApiKey: settings.leonardoApiKey,
+          openrouterApiKey: settings.openrouterApiKey,
+          imageProvider: settings.imageProvider,
+          imageModel: settings.imageModel,
         }),
       })
       const data = await res.json()
@@ -252,9 +270,58 @@ export default function NewTaskPage() {
     } finally { setGenLoading(false) }
   }
 
+  // ─── G: Generate 3 images A/B (top 3 hooks parallel) ───────────────────────
+  const handleGenerateAB = async () => {
+    if (!scraped || !productAnalysis) { toast.error('Analisis produk dulu'); return }
+    const provider = settings.imageProvider
+    if (provider === 'leonardo' && !settings.leonardoApiKey) { toast.error('Leonardo API key belum diisi'); return }
+    if (provider === 'openrouter' && !settings.openrouterApiKey) { toast.error('OpenRouter API key belum diisi'); return }
+    if (needCharacter && !selectedModelId) { toast.error('Pilih model dulu'); return }
+    if (!hooks?.hooks?.length) { toast.error('Hooks belum tersedia'); return }
+
+    setGenLoading(true)
+    const targets = hooks.hooks.slice(0, 3)
+    try {
+      const results = await Promise.allSettled(targets.map((hk) =>
+        fetch('/api/generate-image', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: scraped,
+            productAnalysis,
+            creative,
+            selectedHook: hk,
+            needCharacter,
+            modelId: selectedModelId || null,
+            backgroundId: selectedBgId || null,
+            leonardoApiKey: settings.leonardoApiKey,
+            openrouterApiKey: settings.openrouterApiKey,
+            imageProvider: settings.imageProvider,
+            imageModel: settings.imageModel,
+          }),
+        }).then(r => r.json())
+      ))
+      const fresh: GeneratedImage[] = []
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value?.success) {
+          fresh.push({ ...r.value.data, prompt: `[Hook: "${targets[i]}"] ${r.value.data.prompt}` })
+        }
+      })
+      if (fresh.length === 0) throw new Error('Semua A/B gagal')
+      setGeneratedImages(prev => {
+        const updated = [...prev, ...fresh]
+        setSelectedImgIdx(prev.length)
+        updateTask(taskId, { generatedImages: updated })
+        return updated
+      })
+      toast.success(`A/B selesai — ${fresh.length}/${targets.length} sukses`)
+    } catch (e: any) {
+      toast.error(e.message || 'Gagal A/B generate')
+    } finally { setGenLoading(false) }
+  }
+
   // ─── Generate Script + Clips (Step 6 → 7 → 8 otomatis) ─────────────────────
   const handleGenerateScript = async () => {
-    if (!settings.openaiApiKey) { toast.error('OpenAI API key belum diisi'); return }
+    if (!settings.openrouterApiKey) { toast.error('OpenRouter API key belum diisi'); return }
     const currentImg = generatedImages[selectedImgIdx]
     if (!currentImg) return
 
@@ -268,8 +335,9 @@ export default function NewTaskPage() {
         body: JSON.stringify({
           imageUrl: currentImg.url,
           productName: scraped?.name,
-          hasCharacter: needCharacter ?? false,   // ← diteruskan ke prompt
-          openaiApiKey: settings.openaiApiKey,
+          hasCharacter: needCharacter ?? false,
+          openrouterApiKey: settings.openrouterApiKey,
+          qualityTier: settings.qualityTier,
         }),
       })
       const d6 = await r6.json()
@@ -285,7 +353,8 @@ export default function NewTaskPage() {
           creative,
           selectedHook,
           hasCharacter: needCharacter ?? false,
-          openaiApiKey: settings.openaiApiKey,
+          openrouterApiKey: settings.openrouterApiKey,
+          qualityTier: settings.qualityTier,
         }),
       })
       const d7 = await r7.json()
@@ -304,7 +373,8 @@ export default function NewTaskPage() {
           videoScene,
           selectedHook,
           hasCharacter: needCharacter ?? false,
-          openaiApiKey: settings.openaiApiKey,
+          openrouterApiKey: settings.openrouterApiKey,
+          qualityTier: settings.qualityTier,
         }),
       })
       const d8 = await r8.json()
@@ -318,7 +388,19 @@ export default function NewTaskPage() {
             ? { ...img, sceneAnalysis, videoScene, script, clip1: script.clip1, clip2: script.clip2, fullScene: script.fullScene }
             : img
         )
-        updateTask(taskId, { generatedImages: updated })
+        // Accumulate token usage from steps 6/7/8
+        const stepUsage = {
+          scene_analyze: d6.usage,
+          video_scene: d7.usage,
+          video_prompt: d8.usage,
+        }
+        const stepTotal = (d6.usage?.total_tokens || 0) + (d7.usage?.total_tokens || 0) + (d8.usage?.total_tokens || 0)
+        updateTask(taskId, {
+          generatedImages: updated,
+          selectedHook,
+          input: { ...{}, productLink: productUrl, targetMarket, needCharacter, modelId: selectedModelId, backgroundId: selectedBgId || undefined, selectedHookIdx },
+          usage: { ...stepUsage } as PipelineUsage,
+        })
         return updated
       })
       toast.success('Script & video prompt siap!')
@@ -335,25 +417,14 @@ export default function NewTaskPage() {
 
   // ─── RENDER ──────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-[85vh] bg-background text-foreground relative">
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(139,92,246,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(139,92,246,0.05)_1px,transparent_1px)] bg-[size:60px_60px] pointer-events-none opacity-40 dark:opacity-20" />
+    <PageShell maxWidth="md">
+      <PageHeader
+        title="Tugas Baru"
+        description={`Pipeline UGC 8 step otomatis · ${taskId.slice(-8)}`}
+        back={{ href: '/dashboard' }}
+      />
 
-      <div className="relative max-w-3xl mx-auto px-4 py-10">
-        {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <button
-            onClick={() => uiStep > 1 ? setUiStep(uiStep - 1) : router.push('/dashboard')}
-            className="w-9 h-9 rounded-xl bg-card border border-border flex items-center justify-center hover:bg-muted transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold">Tugas Baru</h1>
-            <p className="text-sm text-muted-foreground font-medium">Pipeline UGC 8 step otomatis</p>
-          </div>
-        </div>
-
-        <StepBar current={uiStep} />
+      <StepBar current={uiStep} />
 
         {/* ══════════════════════════════════════════════════════════════════════
             UI STEP 1 — Input Produk
@@ -646,9 +717,10 @@ export default function NewTaskPage() {
                 <div className="p-4 bg-muted/40 border border-border rounded-xl">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Image Prompt (Leonardo)</p>
-                    <button onClick={() => copy(generatedImages[selectedImgIdx]?.prompt, 'Image prompt disalin!')}
-                      className="p-1 hover:text-violet-500 transition-colors">
-                      <Copy className="w-4 h-4 text-muted-foreground hover:text-violet-500" />
+                    <button onClick={() => copy(generatedImages[selectedImgIdx]?.prompt || '', 'Image prompt disalin!')}
+                      aria-label="Salin image prompt"
+                      className="p-1 hover:text-violet-500 transition-colors focus-visible:ring-2 focus-visible:ring-violet-500/50 rounded">
+                      <Copy className="w-4 h-4 text-muted-foreground hover:text-violet-500" aria-hidden="true" />
                     </button>
                   </div>
                   <p className="text-xs text-foreground leading-relaxed font-mono whitespace-pre-wrap line-clamp-6">
@@ -751,6 +823,13 @@ export default function NewTaskPage() {
                   ? <><Loader2 className="w-5 h-5 animate-spin" /> Generating...</>
                   : <><Sparkles className="w-5 h-5" /> {generatedImages.length === 0 ? 'Generate Gambar' : 'Coba Gambar Lain'}</>}
               </button>
+
+              {hooks && hooks.hooks.length >= 2 && (
+                <button onClick={handleGenerateAB} disabled={genLoading || (needCharacter === true && !selectedModelId)}
+                  className="w-full py-3 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-700 dark:text-violet-300 disabled:opacity-50 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all">
+                  <Sparkles className="w-4 h-4" /> A/B Test — Generate 3 Image (Top 3 Hooks)
+                </button>
+              )}
             </div>
 
             {generatedImages.length > 0 && (
@@ -761,13 +840,12 @@ export default function NewTaskPage() {
             )}
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   )
 }
 
 // ─── Script Display Component ─────────────────────────────────────────────────
-function ScriptDisplay({ img, onCopy }: { img: GeneratedImage; onCopy: (t: string, l?: string) => void }) {
+const ScriptDisplay = memo(function ScriptDisplay({ img, onCopy }: { img: GeneratedImage; onCopy: (t: string, l?: string) => void }) {
   const script = img.script
 
   // ── Build full video JSON (kedua clips + global_constraints) untuk copy ──────
@@ -801,7 +879,6 @@ function ScriptDisplay({ img, onCopy }: { img: GeneratedImage; onCopy: (t: strin
     return JSON.stringify({
       clip_number: clipNum,
       prompt: clip.prompt,
-      ...(clip.endFrame ? { endFrame: clip.endFrame } : {}),
       ...(clip.endFrame ? { endFrame: clip.endFrame } : {}),
     }, null, 2)
   }
@@ -868,10 +945,10 @@ function ScriptDisplay({ img, onCopy }: { img: GeneratedImage; onCopy: (t: strin
       )}
     </div>
   )
-}
+})
 
 // ─── ClipCard — preview 160 char, copy = full JSON clip ─────────────────────
-function ClipCard({
+const ClipCard = memo(function ClipCard({
   label, clip, fullJson, onCopy, copyLabel,
 }: {
   label: string
@@ -882,7 +959,7 @@ function ClipCard({
 }) {
   const PREVIEW_LEN = 160
   const isLong = clip.prompt.length > PREVIEW_LEN
-  const [expanded, setExpanded] = React.useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   return (
     <div className="p-4 bg-violet-500/5 border border-violet-500/20 rounded-xl space-y-2">
@@ -931,14 +1008,7 @@ function ClipCard({
       )}
     </div>
   )
-}
+})
 
 // ─── Helper Components ────────────────────────────────────────────────────────
-function InfoCard({ label, value, className = '' }: { label: string; value: string; className?: string }) {
-  return (
-    <div className={`bg-background border border-border rounded-xl p-3 ${className}`}>
-      <p className="text-xs font-bold text-muted-foreground mb-1 uppercase tracking-wide">{label}</p>
-      <p className="text-sm font-bold text-foreground">{value}</p>
-    </div>
-  )
-}
+// (InfoCard moved to @/components/dashboard/primitives)

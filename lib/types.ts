@@ -128,6 +128,22 @@ export interface GeneratedImage {
   createdAt: number
 }
 
+// ─── TOKEN USAGE ─────────────────────────────────────────────────────────────
+export interface TokenUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+}
+
+export interface PipelineUsage {
+  analyze?: TokenUsage
+  creative_hooks?: TokenUsage
+  scene_analyze?: TokenUsage
+  video_scene?: TokenUsage
+  video_prompt?: TokenUsage
+  total?: number
+}
+
 // ─── TASK (PIPELINE PENUH) ───────────────────────────────────────────────────
 export interface Task {
   id: string
@@ -147,8 +163,10 @@ export interface Task {
   productAnalysis?: ProductAnalysis
   creative?: CreativeConcept
   hooks?: HookOptions
+  hooksAll?: string[]                // 10 hooks lengkap (top5 ada di hooks)
   selectedHook?: string
   generatedImages?: GeneratedImage[]
+  usage?: PipelineUsage              // F: token tracking
   error?: string
 }
 
